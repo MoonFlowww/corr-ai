@@ -582,3 +582,38 @@ def calculate_recovery_ratio(
         recovery_ratio = -100.0
 
     return recovery_ratio
+
+
+def calculate_kelly_criterion(
+    trades: pd.DataFrame,
+    starting_balance: float
+) -> float:
+    """
+    Calculate the Kelly Criterion to suggest optimal position sizing.
+    It determines the fraction of capital to allocate to each trade.
+    Formula: K% = W - [(1 - W) / R] where W is win rate and R is win/loss ratio.
+    :param trades: DataFrame containing trades (requires column profit_abs)
+    :param starting_balance: Starting balance for calculations
+    :return: Kelly Criterion ratio (suggested fraction of capital per trade). Returns -100.0 if calculation is not possible (e.g., no losses).
+    """
+    if len(trades) == 0:
+        return 0.0
+
+    try:
+        winning_trades = trades[trades["profit_abs"] > 0]
+        avg_positive_return = (winning_trades["profit_abs"].mean() / starting_balance) if not winning_trades.empty else 0.0
+
+        losing_trades = trades[trades["profit_abs"] < 0]
+        avg_negative_return = (losing_trades["profit_abs"].mean() / starting_balance) if not losing_trades.empty else 0.0
+        win_rate = len(winning_trades) / len(trades) if len(trades) > 0 else 0.0
+    except ValueError:
+        mdd = 0.0
+
+    
+
+    if len(winning_trades)>0  and len(losing_trades)>0:
+        kelly_ratio = win_rate * ((1-win_rate)/abs(avg_positive_return/avg_negative_return)) #P * (1-P)/R
+    else:
+        kelly_ratio = -100.0
+
+    return kelly_ratio
