@@ -375,3 +375,210 @@ def calculate_calmar(
 
     # print(expected_returns_mean, max_drawdown, calmar_ratio)
     return calmar_ratio
+
+
+def calculate_ulcer_index(trades: pd.DataFrame, starting_balance: float) -> float:
+    """
+    Calculate the Ulcer Index (UI)
+    :param trades: DataFrame containing trades (requires columns close_date and profit_abs)
+    :param starting_balance: Starting balance for calculations
+    :return: Ulcer Index value
+    """
+    if len(trades) == 0:
+        return 0.0
+
+    underwater_df = calculate_underwater(
+        trades=trades,
+        date_col='close_date',
+        value_col='profit_abs',
+        starting_balance=starting_balance
+    )
+    #Mean absolute deviation (MAD)
+    squared_drawdowns = (underwater_df['drawdown_relative'] ** 2)
+    mean_squared_drawdown = squared_drawdowns.mean()
+    ulcer_index = math.sqrt(mean_squared_drawdown)
+
+    return ulcer_index
+
+
+def calculate_ulcer_performance_index(
+    trades: pd.DataFrame,
+    min_date: datetime,
+    max_date: datetime,
+    starting_balance: float,
+    final_balance: float
+) -> float:
+    """
+    Calculate the Ulcer Performance Index (UPI)
+    :param trades: DataFrame containing trades (requires columns close_date and profit_abs)
+    :param min_date: Start date of the period
+    :param max_date: End date of the period
+    :param starting_balance: Starting balance
+    :param final_balance: Final balance
+    :return: Ulcer Performance Index value
+    """
+    if (len(trades) == 0) or (min_date is None) or (max_date is None) or (min_date == max_date):
+        return 0.0
+
+    days_passed = (max_date - min_date).days
+    cagr = calculate_cagr(days_passed, starting_balance, final_balance)
+
+    ulcer_index = calculate_ulcer_index(trades, starting_balance)
+
+    if ulcer_index != 0:
+        upi = cagr / ulcer_index
+    else: #same logic as Sharpe/Calmar
+        upi = -100.0
+
+    return upi
+
+
+def calculate_information_ratio(
+    trades: pd.DataFrame,
+    market_data: dict[str, pd.DataFrame], #TODO: check how to find benchmark data
+    min_date: datetime,
+    max_date: datetime,
+    starting_balance: float
+) -> float:
+    """
+    Calculate the Information Ratio (IR)
+    :param trades: DataFrame containing trades (requires columns close_date and profit_abs)
+    :param market_data: Dict of Dataframes containing market data for benchmark
+    :param min_date: Start date of the period
+    :param max_date: End date of the period
+    :param starting_balance: Starting balance
+    :return: Information Ratio value
+    """
+    if (len(trades) == 0) or (min_date is None) or (max_date is None) or (min_date == max_date):
+        return 0.0
+
+    total_profit = trades["profit_abs"] / starting_balance
+    days_period = max(1, (max_date - min_date).days)
+    avg_returns = total_profit.sum() / days_period
+
+    benchmark_returns = calculate_market_change(market_data, column="close")
+
+    market_returns_series = combined_dataframes_with_rel_mean(
+        market_data, min_date, max_date, column="close"
+    )["rel_mean"].pct_change().fillna(0)
+
+    excess_returns = total_profit - market_returns_series
+
+    tracking_error = np.std(excess_returns)
+
+    # IR
+    if tracking_error != 0:
+        information_ratio = (avg_returns - benchmark_returns) / tracking_error
+    else:
+        information_ratio = -100.0
+
+    return information_ratio
+
+
+def calculate_var(
+    trades: pd.DataFrame,
+    starting_balance: float,
+    quantile: float = 0.05
+) -> float:
+    """
+    Calculate Value at Risk (VaR) at specified quantile
+    :param trades: DataFrame containing trades (requires column profit_abs)
+    :param starting_balance: Starting balance for calculations
+    :param quantile: Quantile level for VaR calculation (default 0.05 for 95% confidence)
+    :return: VaR value (negative value represents loss)
+    """
+    if len(trades) == 0:
+        return 0.0
+
+    returns = trades["profit_abs"] / starting_balance
+
+    var = np.quantile(returns, quantile)
+
+    return var
+
+
+def calculate_cvar(
+    trades: pd.DataFrame,
+    starting_balance: float,
+    quantile: float = 0.05
+) -> float:
+    """
+    Calculate Conditional Value at Risk (CVaR) (risk measure)
+    :param trades: DataFrame containing trades (requires column profit_abs)
+    :param starting_balance: Starting balance for calculations
+    :param quantile: Quantile level for CVaR calculation (default 0.05 for 95% confidence)
+    :return: CVaR value (negative value represents loss)
+    """
+    if len(trades) == 0:
+        return 0.0
+
+    returns = trades["profit_abs"] / starting_balance
+
+    var = calculate_var(trades, starting_balance, quantile)
+
+    cvar = returns[returns <= var].mean()
+
+    return cvar
+
+def calculate_rachev(
+    trades: pd.DataFrame,
+    starting_balance: float,
+    quantile: float = 0.05
+) -> float:
+    """
+    Calculate Rachev Ratio (risk measure)
+    :param trades: DataFrame containing trades (requires column profit_abs)
+    :param starting_balance: Starting balance for calculations
+    :param quantile: Quantile level for calculation (default 0.05 for 95% confidence)
+    :return: Rachev Ratio value (higher is better)
+    """
+    if len(trades) == 0:
+        return 0.0
+
+    returns = trades["profit_abs"] / starting_balance
+
+    # negative kurtosis
+    var_lower = np.quantile(returns, quantile)
+    cvar_lower = returns[returns <= var_lower].mean()
+
+    #Positive kustosis
+    var_upper = np.quantile(returns, 1 - quantile)
+    cvar_upper = returns[returns >= var_upper].mean()
+
+    if cvar_upper != 0 and cvar_lower != 0:
+        rachev_ratio = abs(cvar_upper / cvar_lower)
+    else:
+        rachev_ratio = -100.0
+
+    return rachev_ratio
+
+def calculate_recovery_ratio(
+    trades: pd.DataFrame,
+    starting_balance: float
+) -> float:
+    """
+    Calculate Recovery Ratio (risk measure) how many trades do we need to recover from the max drawdown
+    Only give result if avg_return is positive (profitable edge)
+    :param trades: DataFrame containing trades (requires columns close_date and profit_abs)
+    :param starting_balance: Starting balance for calculations
+    :return: Recovery Ratio value (lower is better)
+    """
+    if len(trades) == 0:
+        return 0.0
+
+    try:
+        drawdown = calculate_max_drawdown(
+            trades, value_col="profit_abs", starting_balance=starting_balance
+        )
+        mdd = drawdown.relative_account_drawdown
+    except ValueError:
+        mdd = 0.0
+
+    avg_return = trades["profit_abs"].mean() / starting_balance
+
+    if avg_return > 0: #only work with positive avg_return
+        recovery_ratio = mdd / avg_return
+    else:
+        recovery_ratio = -100.0
+
+    return recovery_ratio
