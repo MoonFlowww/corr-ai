@@ -22,6 +22,7 @@ from freqtrade.data.metrics import (
     calculate_cvar,
     calculate_rachev,
     calculate_recovery_ratio,
+    calculate_kelly_criterion
 )
 from freqtrade.ft_types import BacktestResultType
 from freqtrade.util import decimals_per_coin, fmt_coin, get_dry_run_wallet
@@ -480,6 +481,7 @@ def generate_strategy_stats(
         "cvar": calculate_cvar(results, start_balance), #new
         "rachev": calculate_rachev(results, start_balance), #new
         "recovery_ratio": calculate_recovery_ratio(results, start_balance), #new || only when avg_return_per_trade > 0
+        "kelly_criterion": calculate_kelly_criterion(results, start_balance), #new
         "profit_factor": profit_factor,
         "backtest_start": min_date.strftime(DATETIME_PRINT_FORMAT),
         "backtest_start_ts": int(min_date.timestamp() * 1000),
